@@ -112,6 +112,8 @@ button {
 }
 
 .contender {
+  color: var(--text);
+  text-align: left;
   background: var(--card);
   border-radius: 14px;
   padding: 18px;
@@ -120,11 +122,15 @@ button {
   flex-direction: column;
   gap: 14px;
   border: 2px solid transparent;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
-.contender:hover { border-color: var(--card-hi); }
+.contender:hover { border-color: var(--green); background: var(--card-hi); }
+.contender:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
+.contender:active { border-color: var(--green); }
 
 .poster-wrap {
+  display: block;
+  width: 100%;
   aspect-ratio: 2 / 3;
   border-radius: 8px;
   overflow: hidden;
@@ -138,7 +144,8 @@ button {
   display: block;
   transition: transform 0.15s;
 }
-.poster-wrap:hover img { transform: scale(1.03); }
+img[hidden] { display: none; }
+.contender:hover .poster-wrap img { transform: scale(1.03); }
 
 .contender-info {
   display: flex;
@@ -160,15 +167,6 @@ button {
 }
 .badge.new { background: rgba(255, 128, 0, 0.15); color: var(--orange); }
 .badge.ranked { background: rgba(64, 188, 244, 0.15); color: var(--blue); }
-
-.choice {
-  padding: 12px;
-  font-weight: 700;
-  font-size: 15px;
-}
-.choice.better { background: var(--green); color: #0c1014; }
-.choice.worse { background: var(--orange); color: #0c1014; }
-.choice:hover { filter: brightness(1.1); }
 
 .secondary-actions {
   display: flex;

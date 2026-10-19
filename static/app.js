@@ -111,7 +111,11 @@ async function pumpPosters() {
       if (res.poster) film.poster = res.poster;
       if (res.filmUrl) film.url = res.filmUrl;
       saveState();
-      if (img && img.dataset.key === key && res.poster) img.src = res.poster;
+      if (img && img.dataset.key === key && res.poster) {
+        img.src = img.id === "poster-candidate" || img.id === "poster-pivot"
+          ? comparisonPoster(res.poster) : res.poster;
+        img.hidden = false;
+      }
     } catch {
       // leave poster missing; placeholder background shows instead
     }
@@ -207,26 +211,41 @@ function renderComparison() {
   const pivot = state.films[state.ranked[mid]];
 
   show("view-compare");
-  $("compare-question").textContent = `Is ${cand.title} better than ${pivot.title}?`;
-  $("poster-candidate").src = cand.poster || "";
-  $("poster-candidate").alt = cand.title;
+  $("compare-question").textContent = "Which film did you prefer?";
+  $("poster-candidate").src = comparisonPoster(cand.poster);
+  $("poster-candidate").alt = "";
+  $("poster-candidate").hidden = !cand.poster;
   $("poster-candidate").dataset.key = cand.key;
   $("poster-pivot").dataset.key = pivot.key;
   queuePoster(cand, $("poster-candidate"), true);
   queuePoster(pivot, $("poster-pivot"), true);
   $("title-candidate").textContent = cand.title;
   $("year-candidate").textContent = cand.year;
-  $("poster-pivot").src = pivot.poster || "";
-  $("poster-pivot").alt = pivot.title;
+  $("poster-pivot").src = comparisonPoster(pivot.poster);
+  $("poster-pivot").alt = "";
+  $("poster-pivot").hidden = !pivot.poster;
   $("title-pivot").textContent = pivot.title;
   $("year-pivot").textContent = pivot.year;
   $("pivot-rank").textContent = `ranked #${mid + 1}`;
 
   const maxComparisons = Math.ceil(Math.log2(state.ranked.length + 1));
+  const filmCount = Object.keys(state.films).length;
   $("progress").textContent =
-    `Film ${placedThisSession + 1} of ${totalToPlace} · ` +
+    `Film ${filmCount - queue.length} of ${filmCount} · ` +
     `comparison ${comparisons + 1} of ≤${maxComparisons}`;
   $("btn-undo").classList.toggle("hidden", undoStack.length === 0);
+}
+
+function comparisonPoster(url) {
+  if (!url) return "";
+  try {
+    const image = new URL(url);
+    if (image.hostname === "a.ltrbxd.com" && image.pathname.startsWith("/resized/")) {
+      image.pathname = image.pathname.replace(/-0-\d+-0-\d+-crop(?=\.)/, "-0-600-0-900-crop");
+      return image.href;
+    }
+  } catch {}
+  return url;
 }
 
 function snapshot() {
@@ -359,13 +378,11 @@ $("setup-form").addEventListener("submit", async (e) => {
   }
 });
 
-$("btn-better").addEventListener("click", () => answer("better"));
-$("btn-worse").addEventListener("click", () => answer("worse"));
+$("side-candidate").addEventListener("click", () => answer("better"));
+$("side-pivot").addEventListener("click", () => answer("worse"));
 $("btn-cantrate").addEventListener("click", () => answer("tie"));
 $("btn-skip").addEventListener("click", skipFilm);
 $("btn-undo").addEventListener("click", undo);
-$("poster-candidate").parentElement.addEventListener("click", () => answer("better"));
-$("poster-pivot").parentElement.addEventListener("click", () => answer("worse"));
 
 $("nav-rank").addEventListener("click", () => {
   if (candidate) renderComparison();

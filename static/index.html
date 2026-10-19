@@ -32,27 +32,25 @@
 
   <section id="view-compare" class="hidden">
     <p id="progress" class="muted center"></p>
-    <h2 class="center" id="compare-question">Which is better?</h2>
+    <h2 class="center" id="compare-question">Which film did you prefer?</h2>
     <div class="duel">
-      <div class="contender" id="side-candidate">
-        <div class="poster-wrap"><img id="poster-candidate" alt=""></div>
-        <div class="contender-info">
+      <button type="button" class="contender" id="side-candidate" aria-labelledby="title-candidate year-candidate">
+        <span class="poster-wrap"><img id="poster-candidate" alt=""></span>
+        <span class="contender-info">
           <span class="film-title" id="title-candidate"></span>
           <span class="film-year" id="year-candidate"></span>
           <span class="badge new">placing</span>
-        </div>
-        <button class="choice better" id="btn-better">Better than →</button>
-      </div>
+        </span>
+      </button>
       <div class="vs">vs</div>
-      <div class="contender" id="side-pivot">
-        <div class="poster-wrap"><img id="poster-pivot" alt=""></div>
-        <div class="contender-info">
+      <button type="button" class="contender" id="side-pivot" aria-labelledby="title-pivot year-pivot">
+        <span class="poster-wrap"><img id="poster-pivot" alt=""></span>
+        <span class="contender-info">
           <span class="film-title" id="title-pivot"></span>
           <span class="film-year" id="year-pivot"></span>
           <span class="badge ranked" id="pivot-rank"></span>
-        </div>
-        <button class="choice worse" id="btn-worse">← Worse than</button>
-      </div>
+        </span>
+      </button>
     </div>
     <div class="secondary-actions">
       <button id="btn-cantrate" class="neutral">Can't rate — call it a tie</button>
