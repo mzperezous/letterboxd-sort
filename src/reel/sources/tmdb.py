@@ -82,78 +82,78 @@ class TmdbClient:
         raise RuntimeError("no TMDB id export found in the last few days")
 
     # ------------------------------------------------------------------ api
-    async def movie(self, movie_id: int) -> tuple[int, dict | None]:
-        resp = await get_with_retry(
-            self.client,
-            f"{self.s.tmdb_base_url}/movie/{movie_id}",
-            limiter=self.limiter,
-            params={"append_to_response": DETAIL_APPEND},
+    async def _get(self, path: str, params: dict | None = None) -> httpx.Response:
+        return await get_with_retry(
+            self.client, f"{self.s.tmdb_base_url}{path}", limiter=self.limiter, params=params
         )
-        if resp.status_code == 404:
-            return 404, None
-        resp.raise_for_status()
-        return 200, trim_movie(resp.json())
 
-    async def changes(self, start: date, end: date) -> list[int]:
-        ids: list[int] = []
+    async def _paged(self, path: str, params: dict, max_pages: int = 500) -> list[dict]:
+        """Concatenate `results` across pages (TMDB caps paging at 500)."""
+        results: list[dict] = []
         page, total = 1, 1
-        while page <= total:
-            resp = await get_with_retry(
-                self.client,
-                f"{self.s.tmdb_base_url}/movie/changes",
-                limiter=self.limiter,
-                params={"start_date": start.isoformat(), "end_date": end.isoformat(), "page": page},
-            )
+        while page <= min(total, max_pages):
+            resp = await self._get(path, {**params, "page": page})
             resp.raise_for_status()
             body = resp.json()
-            total = min(body.get("total_pages", 1), 500)
-            ids += [r["id"] for r in body.get("results", []) if not r.get("adult")]
-            page += 1
-        return ids
-
-    async def discover_ids(self, pages: int, sort_by: str = "vote_count.desc") -> list[int]:
-        """Ids from /discover/movie (20 per page, max 500 pages). vote_count.desc ~ the canon."""
-        ids: list[int] = []
-        for page in range(1, min(pages, 500) + 1):
-            resp = await get_with_retry(
-                self.client,
-                f"{self.s.tmdb_base_url}/discover/movie",
-                limiter=self.limiter,
-                params={"sort_by": sort_by, "include_adult": "false", "page": page},
-            )
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-            if not results:
+            if not body.get("results"):
                 break
-            ids += [r["id"] for r in results]
-        return ids
+            results += body["results"]
+            total = body.get("total_pages", page)
+            page += 1
+        return results
 
-    async def search(self, title: str, year: int | None = None) -> dict:
-        params: dict = {"query": title, "include_adult": "false"}
-        if year:
-            params["year"] = year
-        resp = await get_with_retry(
-            self.client, f"{self.s.tmdb_base_url}/search/movie", limiter=self.limiter, params=params
-        )
+    async def movie(self, movie_id: int) -> RawRecord:
+        """Details + appended sub-resources; a 404 becomes a tombstone record."""
+        resp = await self._get(f"/movie/{movie_id}", {"append_to_response": DETAIL_APPEND})
+        if resp.status_code == 404:
+            return RawRecord(key=str(movie_id), payload=None, status=404)
         resp.raise_for_status()
-        return resp.json()
+        return RawRecord(key=str(movie_id), payload=trim_movie(resp.json()))
+
+    async def changes(self, start: date, end: date) -> list[int]:
+        """Ids with any change in [start, end] (TMDB allows windows of up to 14 days)."""
+        rows = await self._paged(
+            "/movie/changes", {"start_date": start.isoformat(), "end_date": end.isoformat()}
+        )
+        return [r["id"] for r in rows if not r.get("adult")]
+
+    async def discover_ids(self, n: int, sort_by: str = "vote_count.desc") -> list[int]:
+        """Top-n ids from /discover/movie (20 per page). vote_count.desc approximates the canon."""
+        rows = await self._paged(
+            "/discover/movie",
+            {"sort_by": sort_by, "include_adult": "false"},
+            max_pages=-(-n // 20),
+        )
+        return [r["id"] for r in rows][:n]
 
     async def movies(self, ids: Iterable[int]) -> AsyncIterator[RawRecord]:
-        """Fetch many movies concurrently, yielding records as they complete."""
-        sem = asyncio.Semaphore(self.s.tmdb_concurrency)
+        """Fetch many movies with a bounded worker pool, yielding records as they complete."""
+        queue: asyncio.Queue[int | None] = asyncio.Queue()
+        out: asyncio.Queue[RawRecord | BaseException] = asyncio.Queue()
+        ids = list(ids)
+        for i in ids:
+            queue.put_nowait(i)
+        n_workers = max(1, min(self.s.tmdb_concurrency, len(ids)))
+        for _ in range(n_workers):
+            queue.put_nowait(None)
 
-        async def one(mid: int) -> RawRecord:
-            async with sem:
-                status, payload = await self.movie(mid)
-                return RawRecord(key=str(mid), payload=payload, status=status)
+        async def worker():
+            while (mid := await queue.get()) is not None:
+                try:
+                    out.put_nowait(await self.movie(mid))
+                except Exception as e:  # surfaced to the consumer below
+                    out.put_nowait(e)
 
-        tasks = [asyncio.create_task(one(i)) for i in ids]
+        workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
         try:
-            for fut in asyncio.as_completed(tasks):
-                yield await fut
+            for _ in ids:
+                item = await out.get()
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
         finally:
-            for t in tasks:
-                t.cancel()
+            for w in workers:
+                w.cancel()
 
 
 def trim_movie(m: dict) -> dict:
@@ -248,7 +248,7 @@ async def discover_ids_cached(lake: Lake, client: TmdbClient, n: int) -> list[in
         cached = json.loads(lake.store.get(full_key))
         if len(cached) >= n:
             return cached[:n]
-    ids = await client.discover_ids(pages=(n + 19) // 20)
+    ids = await client.discover_ids(n)
     lake.put_file(SOURCE, key, json.dumps(ids).encode())
     return ids[:n]
 
@@ -282,27 +282,57 @@ def select_seed_ids(lake: Lake, limit: int, extra_ids: Iterable[int] = ()) -> li
 
 
 async def ingest_movies(
-    lake: Lake, client: TmdbClient, ids: Iterable[int], *, only_missing: bool = False
+    lake: Lake,
+    client: TmdbClient,
+    ids: Iterable[int],
+    *,
+    only_missing: bool = False,
+    flush_every: int = 200,
 ) -> dict:
+    """Fetch ids into bronze tmdb/movie; unchanged payloads are skipped by content hash."""
     ids = list(dict.fromkeys(int(i) for i in ids))
     latest = lake.latest_hashes(SOURCE, "movie")
     if only_missing:
         ids = [i for i in ids if str(i) not in latest]
     log.info("fetching %d tmdb movies", len(ids))
-    # Bridge async fetching to the synchronous, chunked bronze writer.
-    records: list[RawRecord] = []
     totals = {"requested": len(ids), "seen": 0, "written": 0, "unchanged": 0, "not_found": 0}
+    batch: list[RawRecord] = []
+
+    def flush():
+        for k, v in lake.write_bronze(SOURCE, "movie", batch, latest=latest).items():
+            totals[k] += v
+        batch.clear()
+        log.info("tmdb movies: %d/%d", totals["seen"], len(ids))
+
+    # Flush often: at TMDB's rate limit, a crash should lose at most about a minute of work.
     async for rec in client.movies(ids):
-        if rec.status == 404:
-            totals["not_found"] += 1
-        records.append(rec)
-        if len(records) >= 500:
-            for k, v in lake.write_bronze(SOURCE, "movie", records, latest=latest).items():
-                totals[k] += v
-            records = []
-    for k, v in lake.write_bronze(SOURCE, "movie", records, latest=latest).items():
-        totals[k] += v
+        totals["not_found"] += rec.status == 404
+        batch.append(rec)
+        if len(batch) >= flush_every:
+            flush()
+    flush()
     return totals
+
+
+def referenced_ids(lake: Lake) -> list[int]:
+    """TMDB ids referenced by other sources already in the lake (MovieLens links, RSS)."""
+    ids: list[int] = []
+    for table in ("ml_movie", "lb_rss_entry"):
+        if lake.has_table("silver", table):
+            sql = f"SELECT movie_id FROM {lake.table('silver', table)} WHERE movie_id IS NOT NULL"
+            ids += [r[0] for r in lake.query(sql).fetchall()]
+    return ids
+
+
+async def seed(
+    lake: Lake, client: TmdbClient, *, popular: int, top_voted: int, referenced: bool = True
+) -> dict:
+    """Build the catalog: top-voted (canon) + currently popular + films other sources mention.
+    Only ids not already in bronze are fetched, so this is safe to resume."""
+    voted = await discover_ids_cached(lake, client, top_voted) if top_voted else []
+    extra = voted + (referenced_ids(lake) if referenced else [])
+    ids = select_seed_ids(lake, popular, extra)
+    return await ingest_movies(lake, client, ids, only_missing=True)
 
 
 def catalog_ids(lake: Lake) -> set[int]:

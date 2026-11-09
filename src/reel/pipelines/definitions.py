@@ -77,21 +77,10 @@ def tmdb_seed(reel: ReelResource) -> dg.MaterializeResult:
     s, lake = reel.settings(), reel.lake()
     for name in ("ml_movie", "lb_rss_entry"):  # so referenced films are included
         build_table(lake, name)
-    extra: list[int] = []
-    for name in ("ml_movie", "lb_rss_entry"):
-        if lake.has_table("silver", name):
-            extra += [
-                r[0]
-                for r in lake.query(
-                    f"SELECT movie_id FROM {lake.table('silver', name)} WHERE movie_id IS NOT NULL"
-                ).fetchall()
-            ]
 
     async def run():
         async with tmdb.TmdbClient(s) as c:
-            voted = await tmdb.discover_ids_cached(lake, c, s.seed_top_voted)
-            ids = tmdb.select_seed_ids(lake, s.seed_popular, voted + extra)
-            return await tmdb.ingest_movies(lake, c, ids, only_missing=True)
+            return await tmdb.seed(lake, c, popular=s.seed_popular, top_voted=s.seed_top_voted)
 
     return dg.MaterializeResult(metadata=_meta(asyncio.run(run())))
 

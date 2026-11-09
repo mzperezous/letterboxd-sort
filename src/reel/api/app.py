@@ -8,7 +8,6 @@ Run:  uv run uvicorn reel.api.app:app --reload
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Annotated
 
@@ -44,14 +43,7 @@ def scorer() -> DoubleFeatureScorer:
     return DoubleFeatureScorer(lake(), model())
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    yield
-    model.cache_clear()
-    scorer.cache_clear()
-
-
-app = FastAPI(title="reel", lifespan=lifespan)
+app = FastAPI(title="reel")
 
 
 def db():

@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from reel.lake import TOMBSTONE_HASH, Lake
+from reel.lake import Lake, scd2_sql
 from reel.sources import movielens
 
 log = logging.getLogger(__name__)
@@ -36,34 +36,6 @@ def silver(name: str, deps: tuple[str, ...] = (), description: str = ""):
         return fn
 
     return deco
-
-
-def scd2_sql(bronze_expr: str) -> str:
-    """Collapse a bronze change log into SCD2 versions.
-
-    A version starts whenever a key's content_hash differs from its previous record; it ends when
-    the next version starts. Tombstones become versions with is_deleted = true.
-    """
-    return f"""
-    WITH r AS (
-        SELECT key, fetched_at, status, content_hash, payload FROM {bronze_expr}
-    ),
-    d AS (
-        SELECT *, lag(content_hash) OVER (PARTITION BY key ORDER BY fetched_at) AS prev_hash
-        FROM r
-    ),
-    v AS (SELECT * FROM d WHERE prev_hash IS NULL OR prev_hash <> content_hash)
-    SELECT
-        key,
-        content_hash,
-        content_hash = '{TOMBSTONE_HASH}' AS is_deleted,
-        fetched_at AS valid_from,
-        lead(fetched_at) OVER (PARTITION BY key ORDER BY fetched_at) AS valid_to,
-        lead(fetched_at) OVER (PARTITION BY key ORDER BY fetched_at) IS NULL AS is_current,
-        row_number() OVER (PARTITION BY key ORDER BY fetched_at) AS version,
-        payload
-    FROM v
-    """
 
 
 # ---------------------------------------------------------------------------- TMDB
@@ -351,12 +323,13 @@ def _topo(names: list[str]) -> list[str]:
 
 
 def build_table(lake: Lake, name: str) -> int | None:
-    spec = SILVER[name]
-    # tmdb_movie_history is a hard dependency; others (e.g. ml_movie for movie_xref) are optional.
-    if "tmdb_movie_history" in spec.deps and not lake.has_table("silver", "tmdb_movie_history"):
-        log.info("skip %s: tmdb_movie_history not built", name)
+    """Build one silver table. Returns row count, or None if its inputs don't exist yet
+    (a builder returns None, or references a table that hasn't been built)."""
+    try:
+        sql = SILVER[name].build(lake)
+    except LookupError as e:
+        log.info("skip %s: %s", name, e)
         return None
-    sql = spec.build(lake)
     if sql is None:
         log.info("skip %s: inputs absent", name)
         return None

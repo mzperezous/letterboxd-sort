@@ -49,6 +49,18 @@ FIELD_WEIGHTS: dict[str, float] = {
     "coll": 0.6,
 }
 
+# TMDB keywords that describe the release/production, not the film's content.
+KEYWORD_STOPLIST = {
+    "duringcreditsstinger",
+    "aftercreditsstinger",
+    "post_credits_scene",
+    "sequel",
+    "remake",
+    "3d",
+    "imax",
+    "live_action_remake",
+}
+
 CREW_FIELDS = {
     "Director": "dir",
     "Screenplay": "writer",
@@ -89,7 +101,10 @@ def build_documents(lake: Lake, min_votes: int = 0) -> dict[int, dict[str, list[
     def add(sql: str, fld_of=None):
         for mid, fld, val in lake.query(sql).fetchall():
             if mid in docs and val:
-                docs[mid][fld_of(fld) if fld_of else fld].append(slug(val))
+                tok = slug(val)
+                if fld == "kw" and tok in KEYWORD_STOPLIST:
+                    continue
+                docs[mid][fld_of(fld) if fld_of else fld].append(tok)
 
     add(f"SELECT movie_id, 'genre', genre FROM {t('movie_genre')}")
     add(f"SELECT movie_id, 'kw', keyword FROM {t('movie_keyword')}")

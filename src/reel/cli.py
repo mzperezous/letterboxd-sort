@@ -59,36 +59,24 @@ def tmdb_export(day: str = typer.Option(None, help="YYYY-MM-DD; default latest a
 
 @tmdb_app.command("seed")
 def tmdb_seed(
-    limit: int = typer.Option(2000, help="Top-N ids by current popularity (latest export)"),
-    top_voted: int = typer.Option(10000, help="Top-N ids by all-time vote count (the canon)"),
-    include_movielens: bool = typer.Option(True, help="Also fetch every MovieLens-linked film"),
-    include_letterboxd: bool = typer.Option(True, help="Also fetch films from Letterboxd RSS"),
+    popular: int = typer.Option(None, help="Top-N by current popularity [REEL_SEED_POPULAR]"),
+    top_voted: int = typer.Option(None, help="Top-N by all-time votes [REEL_SEED_TOP_VOTED]"),
+    referenced: bool = typer.Option(True, help="Also fetch films MovieLens/Letterboxd mention"),
 ):
-    """Fetch details for the seed catalog (skips ids already fetched)."""
+    """Fetch details for the seed catalog. Resumable: skips ids already in bronze."""
     from reel.sources import tmdb
 
-    lake = _lake()
-    extra: list[int] = []
-    if include_movielens and lake.has_table("silver", "ml_movie"):
-        extra += [
-            r[0]
-            for r in lake.query(
-                f"SELECT movie_id FROM {lake.table('silver', 'ml_movie')} WHERE movie_id IS NOT NULL"
-            ).fetchall()
-        ]
-    if include_letterboxd and lake.has_table("silver", "lb_rss_entry"):
-        extra += [
-            r[0]
-            for r in lake.query(
-                f"SELECT movie_id FROM {lake.table('silver', 'lb_rss_entry')} WHERE movie_id IS NOT NULL"
-            ).fetchall()
-        ]
+    s = get_settings()
 
     async def run():
-        async with tmdb.TmdbClient(get_settings()) as c:
-            voted = await tmdb.discover_ids_cached(lake, c, top_voted) if top_voted else []
-            ids = tmdb.select_seed_ids(lake, limit, voted + extra)
-            return await tmdb.ingest_movies(lake, c, ids, only_missing=True)
+        async with tmdb.TmdbClient(s) as c:
+            return await tmdb.seed(
+                _lake(),
+                c,
+                popular=s.seed_popular if popular is None else popular,
+                top_voted=s.seed_top_voted if top_voted is None else top_voted,
+                referenced=referenced,
+            )
 
     _print(asyncio.run(run()))
 
@@ -168,12 +156,12 @@ def sql(query: str):
     """Run DuckDB SQL over the lake. Tables are views named silver_<t> / gold_<t>."""
     lake = _lake()
     lake.register_views()
-    typer.echo(lake.query(query).df().to_string() if _has_pandas() else lake.query(query))
+    lake.sql(query).show(max_width=200)
 
 
-@app.command("shell")
-def shell():
-    """Print a DuckDB init script so `duckdb -init <(reel shell)` opens the lake."""
+@app.command("views")
+def views():
+    """Print CREATE VIEW statements for every lake table, e.g. `duckdb -init <(reel views)`."""
     lake = _lake()
     for v in lake.register_views():
         layer, name = v.split("_", 1)
@@ -290,15 +278,6 @@ def db_publish():
     with db.connect(get_settings().pg_dsn) as conn:
         db.migrate(conn)
         _print(publish.publish(_lake(), conn))
-
-
-def _has_pandas() -> bool:
-    try:
-        import pandas  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
 
 
 if __name__ == "__main__":

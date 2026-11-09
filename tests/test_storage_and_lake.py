@@ -2,9 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from reel.lake import TOMBSTONE_HASH, Lake, RawRecord, content_hash
+from reel.lake import TOMBSTONE_HASH, Lake, RawRecord, content_hash, scd2_sql
 from reel.storage import FsspecStore
-from reel.transform import scd2_sql
 
 
 @pytest.mark.parametrize("url", ["memory://reel-test", "file://{tmp}"])

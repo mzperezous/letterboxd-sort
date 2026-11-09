@@ -60,7 +60,7 @@ are stripped *before* hashing (`tmdb.trim_movie` drops `popularity`), so a "vers
 meaningful change. `Lake.write_bronze` looks up the latest hash per key and only appends
 changes, so every ingest is idempotent: re-run it freely.
 
-**SCD2** (`reel.transform.scd2_sql`) turns a bronze change log into versions with
+**SCD2** (`reel.lake.scd2_sql`) turns a bronze change log into versions with
 `valid_from / valid_to / is_current / is_deleted`. Because it's computed from bronze each time,
 there's no merge logic to get wrong. At ~10⁵ films a full rebuild is seconds; past ~10⁷ rows
 you'd switch the same SQL to incremental-by-partition.

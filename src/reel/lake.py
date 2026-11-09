@@ -255,6 +255,34 @@ class Lake:
         return names
 
 
+def scd2_sql(bronze_expr: str) -> str:
+    """Collapse a bronze change log into SCD2 versions.
+
+    A version starts whenever a key's content_hash differs from its previous record; it ends when
+    the next version starts. Tombstones become versions with is_deleted = true.
+    """
+    return f"""
+    WITH r AS (
+        SELECT key, fetched_at, status, content_hash, payload FROM {bronze_expr}
+    ),
+    d AS (
+        SELECT *, lag(content_hash) OVER (PARTITION BY key ORDER BY fetched_at) AS prev_hash
+        FROM r
+    ),
+    v AS (SELECT * FROM d WHERE prev_hash IS NULL OR prev_hash <> content_hash)
+    SELECT
+        key,
+        content_hash,
+        content_hash = '{TOMBSTONE_HASH}' AS is_deleted,
+        fetched_at AS valid_from,
+        lead(fetched_at) OVER (PARTITION BY key ORDER BY fetched_at) AS valid_to,
+        lead(fetched_at) OVER (PARTITION BY key ORDER BY fetched_at) IS NULL AS is_current,
+        row_number() OVER (PARTITION BY key ORDER BY fetched_at) AS version,
+        payload
+    FROM v
+    """
+
+
 def _duck_type(t: pa.DataType) -> str:
     if pa.types.is_timestamp(t):
         return "TIMESTAMPTZ"
