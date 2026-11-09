@@ -20,7 +20,8 @@ make install                 # deps (incl. dagster, dev tools)
 cp .env.example .env         # set REEL_TMDB_TOKEN (TMDB "API Read Access Token")
 make up                      # Postgres + pgvector on :5433 (PROFILE=s3 adds MinIO)
 
-make ingest                  # TMDB id export + MovieLens + ~12k film seed (~10-15 min)
+make ingest                  # TMDB id export + MovieLens + ~12k film seed (~1 h at TMDB's
+                             # 40 req/10s; REEL_SEED_TOP_VOTED=1000 for a 5-min loop)
 make build                   # silver tables → embeddings → clusters → Postgres
 make api                     # http://localhost:8000/docs
 ```

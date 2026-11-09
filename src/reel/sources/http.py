@@ -24,10 +24,18 @@ class RateLimiter:
         self.capacity = burst or max(1, int(rate))
         self.tokens = float(self.capacity)
         self.updated = time.monotonic()
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        # Locks bind to an event loop; recreate if reused under a new loop (e.g. asyncio.run twice).
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
+            self._lock, self._loop = asyncio.Lock(), loop
+        return self._lock
 
     async def acquire(self) -> None:
-        async with self._lock:
+        async with self._get_lock():
             while True:
                 now = time.monotonic()
                 self.tokens = min(self.capacity, self.tokens + (now - self.updated) * self.rate)

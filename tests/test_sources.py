@@ -162,3 +162,13 @@ def test_username_validation():
 
     with pytest.raises(ValueError):
         letterboxd.check_username("../etc/passwd")
+
+
+def test_prune_exports_keeps_latest(lake):
+    for d in range(1, 11):
+        lake.put_file("tmdb", tmdb.export_key(date(2026, 11, d)), b"x")
+    stale = tmdb.prune_exports(lake, keep=3)
+    assert len(stale) == 7
+    assert lake.store.list("files/tmdb/id_exports") == [
+        f"files/tmdb/id_exports/movie_ids_2026-11-{d:02d}.json.gz" for d in (8, 9, 10)
+    ]

@@ -52,7 +52,8 @@ class TmdbClient:
         self.client = httpx.AsyncClient(
             headers=headers, timeout=httpx.Timeout(30.0), transport=transport
         )
-        self.limiter = RateLimiter(settings.tmdb_requests_per_second)
+        # burst=1: never more than rate*window (+1) requests in any window.
+        self.limiter = RateLimiter(settings.tmdb_requests_per_second, burst=1)
 
     async def __aenter__(self):
         return self
@@ -192,7 +193,21 @@ def parse_export(raw: bytes) -> list[dict]:
     return [json.loads(line) for line in lines if line.strip()]
 
 
-async def ingest_id_export(lake: Lake, client: TmdbClient, day: date | None = None) -> dict:
+def prune_exports(lake: Lake, keep: int = 7) -> list[str]:
+    """Raw exports are ~28 MB/day; history already lives in bronze/tmdb/id_export, so only the
+    last `keep` raw files are retained (for popularity ranking)."""
+    keys = sorted(
+        k for k in lake.store.list(f"files/{SOURCE}/id_exports") if k.endswith(".json.gz")
+    )
+    stale = keys[:-keep] if keep else keys
+    for k in stale:
+        lake.store.delete(k)
+    return stale
+
+
+async def ingest_id_export(
+    lake: Lake, client: TmdbClient, day: date | None = None, keep_raw: int = 7
+) -> dict:
     """Store the raw export file (used for popularity / seed ranking) and append id-level
     changes (new, retitled, deleted ids) to bronze tmdb/id_export."""
     if day is None:
@@ -221,7 +236,21 @@ async def ingest_id_export(lake: Lake, client: TmdbClient, day: date | None = No
                 yield RawRecord(key=key, payload=None, status=404, fetched_at=fetched_at)
 
     stats = lake.write_bronze(SOURCE, "id_export", records(), latest=latest)
-    return {"export_date": day.isoformat(), "rows": len(rows), **stats}
+    pruned = prune_exports(lake, keep_raw)
+    return {"export_date": day.isoformat(), "rows": len(rows), "pruned_raw": len(pruned), **stats}
+
+
+async def discover_ids_cached(lake: Lake, client: TmdbClient, n: int) -> list[int]:
+    """Top-n ids by vote count, cached per day in the lake (500 pages = 2.5 min at 3.5 req/s)."""
+    key = f"discover/vote_count_{datetime.now(UTC).date().isoformat()}.json"
+    full_key = f"files/{SOURCE}/{key}"
+    if lake.store.exists(full_key):
+        cached = json.loads(lake.store.get(full_key))
+        if len(cached) >= n:
+            return cached[:n]
+    ids = await client.discover_ids(pages=(n + 19) // 20)
+    lake.put_file(SOURCE, key, json.dumps(ids).encode())
+    return ids[:n]
 
 
 def latest_export_uri(lake: Lake) -> str:

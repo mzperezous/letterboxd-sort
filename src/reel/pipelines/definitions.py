@@ -89,8 +89,8 @@ def tmdb_seed(reel: ReelResource) -> dg.MaterializeResult:
 
     async def run():
         async with tmdb.TmdbClient(s) as c:
-            voted = await c.discover_ids(pages=(s.seed_top_voted + 19) // 20)
-            ids = tmdb.select_seed_ids(lake, s.seed_popular, voted[: s.seed_top_voted] + extra)
+            voted = await tmdb.discover_ids_cached(lake, c, s.seed_top_voted)
+            ids = tmdb.select_seed_ids(lake, s.seed_popular, voted + extra)
             return await tmdb.ingest_movies(lake, c, ids, only_missing=True)
 
     return dg.MaterializeResult(metadata=_meta(asyncio.run(run())))

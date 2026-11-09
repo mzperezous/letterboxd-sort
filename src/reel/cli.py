@@ -86,8 +86,8 @@ def tmdb_seed(
 
     async def run():
         async with tmdb.TmdbClient(get_settings()) as c:
-            voted = await c.discover_ids(pages=(top_voted + 19) // 20) if top_voted else []
-            ids = tmdb.select_seed_ids(lake, limit, voted[:top_voted] + extra)
+            voted = await tmdb.discover_ids_cached(lake, c, top_voted) if top_voted else []
+            ids = tmdb.select_seed_ids(lake, limit, voted + extra)
             return await tmdb.ingest_movies(lake, c, ids, only_missing=True)
 
     _print(asyncio.run(run()))

@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     tmdb_token: SecretStr | None = None
     tmdb_base_url: str = "https://api.themoviedb.org/3"
     tmdb_export_base_url: str = "https://files.tmdb.org/p/exports"
-    tmdb_requests_per_second: float = 20.0
-    tmdb_concurrency: int = 16
+    tmdb_requests_per_second: float = 3.5  # TMDB limit is 40 req / 10s; keep headroom
+    tmdb_concurrency: int = 4
 
     # --- MovieLens ---
     movielens_base_url: str = "https://files.grouplens.org/datasets/movielens"
