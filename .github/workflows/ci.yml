@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: reel
+          POSTGRES_PASSWORD: reel
+          POSTGRES_DB: reel
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U reel" --health-interval 2s --health-retries 30
+    env:
+      REEL_TEST_PG_DSN: postgresql://reel:reel@localhost:5433/reel_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pytest -q
+      - run: uv run dagster definitions validate -m reel.pipelines.definitions

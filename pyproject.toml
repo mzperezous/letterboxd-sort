@@ -1,0 +1,51 @@
+[project]
+name = "reel"
+version = "0.1.0"
+description = "Film data platform: ingestion, change capture, and ML for mood search and double features."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "duckdb>=1.1",
+  "pyarrow>=17",
+  "fsspec>=2024.6",
+  "s3fs>=2024.6",
+  "httpx>=0.27",
+  "tenacity>=9",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "typer>=0.12",
+  "psycopg[binary]>=3.2",
+  "numpy>=1.26",
+  "scikit-learn>=1.5",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+orchestration = ["dagster>=1.9", "dagster-webserver>=1.9"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "ipykernel>=6"]
+
+[project.scripts]
+reel = "reel.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reel"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# E501: long SQL strings are clearer unwrapped (ruff format handles code). B008: typer idiom.
+ignore = ["E501", "B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["postgres: needs a running Postgres (REEL_PG_DSN)", "network: hits real external APIs"]
